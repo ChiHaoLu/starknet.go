@@ -1,6 +1,7 @@
 Note: To run this example, you need a sepolia endpoint.
 
 Steps to run this example on sepolia: 
+0. Have deployed your starknet-sepolia account already. ([ref.](https://book.starknet.io/ch02-05-01-start-with-sepolia.html)) 
 1. rename ".env.template" to ".env.sepolia"
 2. uncomment, and set env variables
 4. make sure you are in the "withdrawFromL1ToL2" directory
