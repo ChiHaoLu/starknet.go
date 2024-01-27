@@ -28,7 +28,7 @@ import (
 
 const (
 	chainName              string = "sepolia"
-	accountContractVersion int    = 0 //Replace with the cairo version of your account contract
+	accountContractVersion int    = 1 //Replace with the cairo version of your account contract
 )
 
 /*
@@ -155,7 +155,7 @@ func ImportAccount(l2Client *rpc.Provider, pubKey string, l2PrivKey string, acco
 	if err != nil {
 		panic("Error casting accountAddress to felt")
 	}
-	l2Account, err := account.NewAccount(l2Client, accountAddressFelt, os.Getenv("L2_PUB_KEY"), ks, accountContractVersion)
+	l2Account, err := account.NewAccount(l2Client, accountAddressFelt, pubKey, ks, accountContractVersion)
 	if err != nil {
 		panic(err)
 	}
@@ -230,15 +230,12 @@ func InvokeL2Contract(l2Client *rpc.Provider, accnt *account.Account, contractAd
 		panic(err.Error())
 	}
 
-	// Check the signature is valid or not, this is in StarkCurve!!!
+	// Check the signature is valid or not
 	txHash, err := accnt.TransactionHashInvoke(InvokeTx)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(txHash)
-	checkCalldata := append([]*felt.Felt{
-		txHash},
-		InvokeTx.Signature...)
+	checkCalldata := []*felt.Felt{txHash, InvokeTx.Signature[0], InvokeTx.Signature[1]}
 	checkTx := rpc.FunctionCall{
 		ContractAddress:    accnt.AccountAddress,
 		EntryPointSelector: utils.GetSelectorFromNameFelt("isValidSignature"),
