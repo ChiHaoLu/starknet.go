@@ -13,6 +13,7 @@ import (
 	"github.com/NethermindEth/juno/core/felt"
 	"github.com/NethermindEth/starknet.go/account"
 	"github.com/NethermindEth/starknet.go/rpc"
+	"github.com/NethermindEth/starknet.go/utils"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -28,6 +29,68 @@ const (
 	chainName              string = "sepolia"
 	accountContractVersion int    = 1 //Replace with the cairo version of your account contract
 )
+
+/*
+ * @author ChiHaoLu (chihaolu.me)
+ * @title WithdrawFromL2ToL1 example
+ */
+func main() {
+	// Load ENV vriables
+	fmt.Println("Starting withdrawFromL2ToL1 example")
+	godotenv.Load(fmt.Sprintf(".env.%s", chainName))
+
+	// Setup L1 Client
+	l1Client, err := ethrpc.DialContext(context.Background(), os.Getenv("L1_RPC_URL"))
+	if err != nil {
+		fmt.Println("Failed to connect to the client, did you specify the url in the .env.sepolia?")
+		panic(err)
+	}
+
+	// Setup L2 Client
+	l2ClientBase, err := ethrpc.DialContext(context.Background(), os.Getenv("L2_RPC_URL"))
+	if err != nil {
+		fmt.Println("Failed to connect to the client, did you specify the url in the .env.sepolia?")
+		panic(err)
+	}
+	l2Client := rpc.NewProvider(l2ClientBase)
+
+	// Load L1 Account
+	l1PrivKey := os.Getenv("L1_PRIV_KEY")
+	l1Address := GetEthereumAddressFromHexPrivKey(l1PrivKey)
+	fmt.Println("Load L1 account: ", l1Address)
+
+	// Load L2 Account
+	l2Account := ImportAccount(l2Client, os.Getenv("L2_PUB_KEY"), os.Getenv("L2_PRIV_KEY"), accountContractVersion)
+	fmt.Println("Load L2 account: ", l2Account.AccountAddress)
+
+	// Make sure the balance is enough
+	L1Balance, err := GetL1ETHBalance(l1Client, l1Address)
+	if err != nil {
+		panic(err)
+	}
+	if L1Balance.Cmp(big.NewFloat(0)) <= 0 {
+		panic("You don't have enough ether in l1 accounts")
+	}
+	fmt.Printf("L1 Balance: %f ETH\n", L1Balance)
+	L2Balance, err := GetL2ETHBalance(l2Client, l2Account.AccountAddress, Sepolia.tokenList[0].l2TokenAddr, Sepolia.tokenList[0].decimals)
+	if err != nil {
+		panic(err)
+	}
+	if L2Balance.Cmp(big.NewFloat(0)) <= 0 {
+		panic("You don't have enough ether in l2 accounts")
+	}
+	fmt.Printf("L2 Balance: %f ETH\n", L2Balance)
+
+	// Call the initiate_withdraw on the L2 StarkGate Contract.
+
+	// Trigger withdraw on the L1 StarkGate Contract.
+
+	// Check the L1 recipient ETH balance
+}
+
+/* ======================
+ * Chain Information
+ * ====================== */
 
 type ChainInfo struct {
 	name      string
@@ -45,6 +108,7 @@ type TokenInfo struct {
 	l2BridgeAddr string
 }
 
+// Ref: https://github.com/starknet-io/starknet-addresses/blob/master/bridged_tokens/sepolia.json
 var Sepolia = ChainInfo{
 	name:   "Sepolia",
 	rpcUrl: "",
@@ -70,66 +134,6 @@ var Sepolia = ChainInfo{
 	},
 }
 
-var Mainnet = ChainInfo{
-	name:   "Mainnet",
-	rpcUrl: "",
-	tokenList: []TokenInfo{
-		{
-			name:         "Ether",
-			symbol:       "ETH",
-			decimals:     18,
-			l1TokenAddr:  "0x0000000000000000000000000000000000455448",
-			l2TokenAddr:  "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7",
-			l1BridgeAddr: "0xae0Ee0A63A2cE6BaeEFFE56e7714FB4EFE48D419",
-			l2BridgeAddr: "0x073314940630fd6dcda0d772d4c972c4e0a9946bef9dabf4ef84eda8ef542b82",
-		},
-		{
-			name:         "USD Coin",
-			symbol:       "USDC",
-			decimals:     6,
-			l1TokenAddr:  "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-			l2TokenAddr:  "0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8",
-			l1BridgeAddr: "0xF6080D9fbEEbcd44D89aFfBFd42F098cbFf92816",
-			l2BridgeAddr: "0x05cd48fccbfd8aa2773fe22c217e808319ffcc1c5a6a463f7d8fa2da48218196",
-		},
-	},
-}
-
-func main() {
-	// Load ENV vriables
-	fmt.Println("Starting getTokenBalance example")
-	godotenv.Load(fmt.Sprintf(".env.%s", chainName))
-	base := os.Getenv("INTEGRATION_BASE")
-
-	// Setup L2 Client
-	c, err := ethrpc.DialContext(context.Background(), base)
-	if err != nil {
-		fmt.Println("Failed to connect to the client, did you specify the url in the .env.mainnet?")
-		panic(err)
-	}
-	l2Client := rpc.NewProvider(c)
-	fmt.Println("Established connection with the client")
-
-	// Load L1 Account
-	l1PrivKey := os.Getenv("L1_PRIV_KEY")
-	l1Address := GetEthereumAddressFromHexPrivKey(l1PrivKey)
-	fmt.Println("Load L1 account: ", l1Address)
-
-	// Load L2 Account
-	pubKey := os.Getenv("L2_PUB_KEY")
-	l2PrivKey := os.Getenv("L2_PRIV_KEY")
-	l2Account := ImportAccount(l2Client, pubKey, l2PrivKey, accountContractVersion)
-	fmt.Println("Load L2 account: ", l2Account.AccountAddress)
-
-	// Make sure the balance is enough
-
-	// Call the initiate_withdraw on the L2 StarkGate Contract.
-
-	// Trigger withdraw on the L1 StarkGate Contract.
-
-	// Check the L1 recipient ETH balance
-}
-
 /* ======================
  * L2 Helper Function
  * ====================== */
@@ -148,6 +152,29 @@ func ImportAccount(l2Client *rpc.Provider, pubKey string, l2PrivKey string, acco
 		panic(err)
 	}
 	return l2Account
+}
+
+func GetL2ETHBalance(rpcclient *rpc.Provider, accountAddressInFelt *felt.Felt, tokenAddress string, decimals int) (*big.Float, error) {
+	tokenAddressInFelt, err := utils.HexToFelt(tokenAddress)
+	if err != nil {
+		fmt.Println("Failed to transform the token contract address, did you give the hex address?")
+		panic(err)
+	}
+	tx := rpc.FunctionCall{
+		ContractAddress:    tokenAddressInFelt,
+		EntryPointSelector: utils.GetSelectorFromNameFelt("balanceOf"),
+		Calldata:           []*felt.Felt{accountAddressInFelt},
+	}
+	callResp, err := rpcclient.Call(context.Background(), tx, rpc.BlockID{Tag: "latest"})
+	if err != nil {
+		panic(err.Error())
+	}
+
+	decimalsInBig := big.NewInt(int64(decimals))
+	floatValue := new(big.Float).SetInt(utils.FeltToBigInt(callResp[0]))
+	floatValue.Quo(floatValue, new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), decimalsInBig, nil)))
+
+	return floatValue, nil
 }
 
 /* ======================
