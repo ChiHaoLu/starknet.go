@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"time"
 
 	"github.com/NethermindEth/juno/core/felt"
 	"github.com/NethermindEth/starknet.go/account"
@@ -27,7 +28,7 @@ import (
 
 const (
 	chainName              string = "sepolia"
-	accountContractVersion int    = 1 //Replace with the cairo version of your account contract
+	accountContractVersion int    = 0 //Replace with the cairo version of your account contract
 )
 
 /*
@@ -82,6 +83,13 @@ func main() {
 	fmt.Printf("L2 Balance: %f ETH\n", L2Balance)
 
 	// Call the initiate_withdraw on the L2 StarkGate Contract.
+	var calldata []*felt.Felt
+
+	l1_recipient, _ := utils.HexToFelt(l1Address.String())
+	amount := utils.BigIntToFelt(big.NewInt(100000000000000))
+	calldata = append(calldata, l1_recipient)
+	calldata = append(calldata, amount)
+	InvokeL2Contract(l2Client, l2Account, Sepolia.tokenList[0].l2BridgeAddr, "initiate_withdraw", "0x9184e72a000", calldata)
 
 	// Trigger withdraw on the L1 StarkGate Contract.
 
@@ -175,6 +183,81 @@ func GetL2ETHBalance(rpcclient *rpc.Provider, accountAddressInFelt *felt.Felt, t
 	floatValue.Quo(floatValue, new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), decimalsInBig, nil)))
 
 	return floatValue, nil
+}
+
+func InvokeL2Contract(l2Client *rpc.Provider, accnt *account.Account, contractAddress string, contractMethod string, maxFee string, calldata []*felt.Felt) {
+	maxfee, err := utils.HexToFelt(maxFee)
+	if err != nil {
+		panic(err.Error())
+	}
+	// Getting the nonce from the account
+	nonce, err := accnt.Nonce(context.Background(), rpc.BlockID{Tag: "latest"}, accnt.AccountAddress)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Building the InvokeTx struct
+	InvokeTx := rpc.InvokeTxnV1{
+		MaxFee:        maxfee,
+		Version:       rpc.TransactionV1,
+		Nonce:         nonce,
+		Type:          rpc.TransactionType_Invoke,
+		SenderAddress: accnt.AccountAddress,
+	}
+
+	// Converting the contractAddress from hex to felt
+	contractAddressInFelt, err := utils.HexToFelt(contractAddress)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Building the functionCall struct, where :
+	FnCall := rpc.FunctionCall{
+		ContractAddress:    contractAddressInFelt,                         //contractAddress is the contract that we want to call
+		EntryPointSelector: utils.GetSelectorFromNameFelt(contractMethod), //this is the function that we want to call
+		Calldata:           calldata,
+	}
+
+	// Building the Calldata with the help of FmtCalldata where we pass in the FnCall struct along with the Cairo version
+	InvokeTx.Calldata, err = accnt.FmtCalldata([]rpc.FunctionCall{FnCall})
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Signing of the transaction that is done by the account
+	err = accnt.SignInvokeTransaction(context.Background(), &InvokeTx)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// Check the signature is valid or not, this is in StarkCurve!!!
+	txHash, err := accnt.TransactionHashInvoke(InvokeTx)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(txHash)
+	checkCalldata := append([]*felt.Felt{
+		txHash},
+		InvokeTx.Signature...)
+	checkTx := rpc.FunctionCall{
+		ContractAddress:    accnt.AccountAddress,
+		EntryPointSelector: utils.GetSelectorFromNameFelt("isValidSignature"),
+		Calldata:           checkCalldata,
+	}
+	fmt.Println(checkCalldata)
+	isValid, err := l2Client.Call(context.Background(), checkTx, rpc.BlockID{Tag: "latest"})
+	if err != nil {
+		panic(err.Error())
+	}
+	fmt.Println(isValid)
+
+	// After the signing we finally call the AddInvokeTransaction in order to invoke the contract function
+	resp, err := accnt.AddInvokeTransaction(context.Background(), InvokeTx)
+	if err != nil {
+		panic(err.Error())
+	}
+	// This returns us with the transaction hash
+	fmt.Println("Transaction hash response : ", resp.TransactionHash)
 }
 
 /* ======================
@@ -287,4 +370,18 @@ func SendTransaction(rpcUrl string, from *common.Address, signedTx *types.Transa
 	}
 	fmt.Println(txResult)
 	return "TBD", nil
+}
+
+func WaitForL2L1MsgConsumed(accnt *account.Account, Txnhash *felt.Felt) {
+	for {
+		resp, err := accnt.GetTransactionStatus(context.Background(), Txnhash)
+		if err != nil {
+			panic(err)
+		}
+		if resp.FinalityStatus == rpc.TxnStatus_Accepted_On_L2 {
+			break
+		}
+		time.Sleep(1 * time.Second)
+		fmt.Println(resp.ExecutionStatus.MarshalJSON())
+	}
 }
